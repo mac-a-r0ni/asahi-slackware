@@ -22,12 +22,14 @@
 #  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+https://github.com/AsahiLinux/m1n1/archive/1.1.8/m1n1-1.1.8.tar.gz
+
 cd $(dirname $0) ; CWD=$(pwd)
 
 PRGNAM=m1n1
 VERSION=${VERSION:-$(echo $PRGNAM-*.tar.?z* | rev | cut -f 3- -d . | cut -f 1 -d - | rev)}
 BUILD=${BUILD:-1}
-TAG=${TAG:-_sln}
+TAG=${TAG:-_lngn}
 
 if [ -z "$ARCH" ]; then
   case "$( uname -m )" in
