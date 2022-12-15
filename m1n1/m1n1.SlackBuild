@@ -22,7 +22,7 @@
 #  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-https://github.com/AsahiLinux/m1n1/archive/1.1.8/m1n1-1.1.8.tar.gz
+https://github.com/AsahiLinux/m1n1/archive/1.2.3/m1n1-1.2.3.tar.gz
 
 cd $(dirname $0) ; CWD=$(pwd)
 
