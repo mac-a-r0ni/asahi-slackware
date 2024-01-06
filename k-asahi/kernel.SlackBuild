@@ -305,7 +305,7 @@ popd
 # to be up to date on the live system so that mkinitrd can grab what it needs:
 ( cd /
   echo "Updating host OS' module dependencies for $VERSION-$SLKKERNELARCH"
-  find lib/modules -name $VERSION-$SLKKERNELARCH -type d -mindepth 1 -maxdepth 1 -printf "%f\n" | xargs -i depmod {} -b. )
+  find lib/modules -name 6.6.0-$SLKKERNELARCH -type d -mindepth 1 -maxdepth 1 -printf "%f\n" | xargs -i depmod {} -b. )
 
 # Install the kernel image and system map:
 mkdir -vpm755 $PKG/{install,boot}
@@ -518,12 +518,12 @@ zcat $TMPBUILD/initrdtmp.gz | cpio -di
 echo "Copying Kernel modules into OS InitRD"
 rm -rf lib/modules # purge what 'mkinitrd' populated
 # Copy the indexes, etc. (everything other than the Kernel modules and the build/source symlinks):
-mkdir -vpm755 lib/modules/$VERSION-$SLKKERNELARCH/kernel
+mkdir -vpm755 lib/modules/6.6.0-$SLKKERNELARCH/kernel
 #cp -fa $PKG/lib/modules/6.6.0-$SLKKERNELARCH/!(build|kernel|source) lib/modules/$VERSION-$SLKKERNELARCH/
-cp -fa $PKG/lib/modules/6.6.0-$SLKKERNELARCH/modules.{order,builtin*} lib/modules/$VERSION-$SLKKERNELARCH/
+cp -fa $PKG/lib/modules/6.6.0-$SLKKERNELARCH/modules.{order,builtin*} lib/modules/6.6.0-$SLKKERNELARCH/
 
 # Copy the Kernel module directories containing the major components:
-pushd $PKG/lib/modules/$VERSION-$SLKKERNELARCH/kernel
+pushd $PKG/lib/modules/6.6.0-$SLKKERNELARCH/kernel
 grep -Ev '^#|^$' ${KMODINCLUDELIST} | tar --wildcards -pvvcf - -T- | tar -C${TMPBUILD}/initrd-tree/lib/modules/6.6.0-$SLKKERNELARCH/kernel/ -pxf -
 popd
 
