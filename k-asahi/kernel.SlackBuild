@@ -123,7 +123,7 @@ if [ "$ALTERNATEKSRC" = "Yes" ]; then
    echo "Entering unpacked Linux Kernel source directory $KERNELSRCDIR"
  else
    echo -n "Extracting Kernel source... "
-   tar xf $CWD/sources/linux-*.tar.gz || exit 1
+   tar xf $CWD/sources/asahi-*.tar.gz || exit 1
    echo "done"
    # Make the source tree dir name match $VERSION (useful for rc releases)
    mv -fv linux-* linux-$VERSION
