@@ -2,7 +2,7 @@
 
 # Slackware build script for m1n1 (asahi-bootloader)
 
-# Copyright 2022 Jay Lanagan (j@lngn.net), Detroit, MI, USA
+# Copyright 2022-2024 Jay Lanagan (j@lngn.net), Detroit, MI, USA
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -22,7 +22,7 @@
 #  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-wget -c https://github.com/AsahiLinux/m1n1/archive/1.2.3/m1n1-1.2.3.tar.gz
+wget -c https://github.com/AsahiLinux/m1n1/archive/1.4.11/m1n1-1.4.11.tar.gz
 
 cd $(dirname $0) ; CWD=$(pwd)
 
@@ -83,8 +83,8 @@ find . \
  \( -perm 666 -o -perm 664 -o -perm 600 -o -perm 444 -o -perm 440 -o -perm 400 \) \
  -exec chmod 644 {} \+
 
-export CFLAGS="$SLKCFLAGS"
-export CXXFLAGS="$SLKCFLAGS"
+export CFLAGS="$SLKCFLAGS" \
+export CXXFLAGS="$SLKCFLAGS" \
 
 make ARCH= RELEASE=1
 
