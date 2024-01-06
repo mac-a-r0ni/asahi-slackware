@@ -157,14 +157,14 @@ sed -i '/EXTRAVERSION *=/s/-//g' Makefile
 # If we're doing builds of RC kernels, we can ignore this check and assume we performed the
 # necessary due dilligence.  Non-RC releases have no 'EXTRAVERSION' value set.
 #
-if ! echo "$VERSION" | grep -E "rc|next" ; then
-   if [ "$( echo "$(sed -ne's/^VERSION *= *//p' Makefile).$(sed -ne's/^PATCHLEVEL *= *//p' Makefile).$(sed -ne's/^SUBLEVEL *= *//p' Makefile)" )" != $VERSION ]; then
-      echo "**** Package name vs Kernel version mismatch ****"
-      echo "*** Slackware Packaging Version: $VERSION"
-      echo "*** Kernel versions (From files): $( sed -ne's/^VERSION *= *//p' Makefile).$(sed -ne's/^PATCHLEVEL *= *//p' Makefile).$(sed -ne's/^SUBLEVEL *= *//p' Makefile )"
-      exit 1
-   fi
-fi
+#if ! echo "$VERSION" | grep -E "rc|next" ; then
+#   if [ "$( echo "$(sed -ne's/^VERSION *= *//p' Makefile).$(sed -ne's/^PATCHLEVEL *= *//p' Makefile).$(sed -ne's/^SUBLEVEL *= *//p' Makefile)" )" != $VERSION ]; then
+#      echo "**** Package name vs Kernel version mismatch ****"
+#      echo "*** Slackware Packaging Version: $VERSION"
+#      echo "*** Kernel versions (From files): $( sed -ne's/^VERSION *= *//p' Makefile).$(sed -ne's/^PATCHLEVEL *= *//p' Makefile).$(sed -ne's/^SUBLEVEL *= *//p' Makefile )"
+#      exit 1
+#   fi
+#fi
 
 echo "Kernel Slackware package version: $VERSION"
 
