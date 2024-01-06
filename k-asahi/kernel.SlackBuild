@@ -524,7 +524,7 @@ cp -fa $PKG/lib/modules/6.6.0-$SLKKERNELARCH/modules.{order,builtin*} lib/module
 
 # Copy the Kernel module directories containing the major components:
 pushd $PKG/lib/modules/$VERSION-$SLKKERNELARCH/kernel
-grep -Ev '^#|^$' ${KMODINCLUDELIST} | tar --wildcards -pvvcf - -T- | tar -C${TMPBUILD}/initrd-tree/lib/modules/$VERSION-$SLKKERNELARCH/kernel/ -pxf -
+grep -Ev '^#|^$' ${KMODINCLUDELIST} | tar --wildcards -pvvcf - -T- | tar -C${TMPBUILD}/initrd-tree/lib/modules/6.6.0-$SLKKERNELARCH/kernel/ -pxf -
 popd
 
 # Slim down the modules within the initrd by removing unnecessary
