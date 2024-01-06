@@ -251,8 +251,8 @@ make ARCH=$LINUXKERNELARCH modules_install INSTALL_MOD_PATH=$PKG || exit 1
 
 # We'll install the Kernel modules to the OS once they have been
 # compressed within $PKG:
-if [ -d $PKG/lib/modules/$VERSION-$SLKKERNELARCH ]; then
-   rm -rf /lib/modules/$VERSION-$SLKKERNELARCH
+if [ -d $PKG/lib/modules/6.6.0-$SLKKERNELARCH ]; then
+   rm -rf /lib/modules/6.6.0-$SLKKERNELARCH
  else
    read -p "ERROR: The Kernel modules aren't present within the package directory"
    exit 1
@@ -278,7 +278,7 @@ pushd $PKG
 
    # Install the newly-compressed Kernel modules into the OS:
    echo "Installing compressed Kernel modules into /lib/modules for the running OS"
-   time cp -fa ./lib/modules/$VERSION-$SLKKERNELARCH /lib/modules/
+   time cp -fa ./lib/modules/6.6.0-$SLKKERNELARCH /lib/modules/
 popd
 
 # Compress OS's copy of the Linux kernel modules to reduce the size of the initrd.
@@ -519,8 +519,8 @@ echo "Copying Kernel modules into OS InitRD"
 rm -rf lib/modules # purge what 'mkinitrd' populated
 # Copy the indexes, etc. (everything other than the Kernel modules and the build/source symlinks):
 mkdir -vpm755 lib/modules/$VERSION-$SLKKERNELARCH/kernel
-#cp -fa $PKG/lib/modules/$VERSION-$SLKKERNELARCH/!(build|kernel|source) lib/modules/$VERSION-$SLKKERNELARCH/
-cp -fa $PKG/lib/modules/$VERSION-$SLKKERNELARCH/modules.{order,builtin*} lib/modules/$VERSION-$SLKKERNELARCH/
+#cp -fa $PKG/lib/modules/6.6.0-$SLKKERNELARCH/!(build|kernel|source) lib/modules/$VERSION-$SLKKERNELARCH/
+cp -fa $PKG/lib/modules/6.6.0-$SLKKERNELARCH/modules.{order,builtin*} lib/modules/$VERSION-$SLKKERNELARCH/
 
 # Copy the Kernel module directories containing the major components:
 pushd $PKG/lib/modules/$VERSION-$SLKKERNELARCH/kernel
