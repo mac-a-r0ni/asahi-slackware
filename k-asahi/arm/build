@@ -1,0 +1,83 @@
+#!/bin/bash
+#
+# arm/build
+# Kernel package build script.
+# by Stuart Winter <mozes@slackware.com>
+#
+source /usr/share/slackdev/buildkit.sh
+
+# If it's an -rc release, remove the hyphen and rename
+# the source archive.  It makes packaging and scripting all play happily.
+# Also make sure you comment out the $VERSION vs Makefile version
+# check in kernel.SlackBuild
+# Release candidates don't include "rc" in the 4.4.x kernels
+#export VERSION=${VERSION:-4.13.0rc2next20170728}
+#export VERSION=${VERSION:-4.13.0rc3}
+#export VERSION=${VERSION:-4.13.0}
+export VERSION=${VERSION:-6.6-14}
+
+# A stable release:
+# With Linux 3.x, it always has a 3 digit number - e.g. 3.2.0 rather than just 3.2:
+# You also need to change the version in kernel-source.SlackBuild
+#export VERSION=${VERSION:-4.10.0next20170224}
+#export VERSION=${VERSION:-4.9.3}
+export BUILD=${BUILD:-1}
+export PKGSERIES=${PKGSERIES:-a}
+
+# If building in /patches for a Stable Release, we drop the packages into /tmp/patches/
+slack_findpkgstore_is_stablerelease && {
+    export PKGSTORE=/tmp/
+    export PKGSERIES=patches
+    export BUILD=1_slack15.0
+    mkdir -vpm755 $PKGSTORE/$PKGSERIES
+    echo "*** Building on a Stable release - resulting packages will be dropped in to $PKGSTORE/$PKGSERIES **" ;}
+
+# Select the kernel to build.  As we have a single Kernel per architecture,
+# we'll take the setting from slackkit.
+# We also set the *Linux* Kernel architecture name, since it's
+# "arm" for armv7/32bit
+# "arm64" for armv7/64bit/aarch64
+case $SLKPORTARCH in
+   arm)     export SLKKERNELARCH="armv7"
+            export LINUXKERNELARCH="arm"
+            export ARCH="arm" ;;
+   aarch64) export SLKKERNELARCH="asahi"
+            export LINUXKERNELARCH="arm64"
+            export ARCH="arm64" ;;
+esac
+
+# Assume we want to build a Versatile Kernel if we did not
+# specify any particular arch type:
+#if [ -z "$1" ]; then
+#   # For this package only, we use branded hardware names as the $ARCH: riscpc, iyonix, cats, netwinder, riscstation
+#   # export SLKKERNELARCH=riscpc
+#   export SLKKERNELARCH=armv7
+# else
+#   export SLKKERNELARCH=$1
+#fi
+
+# Ensure build dependencies are met:
+# We require Das U-Boot 'mkimage' tool to build the 'uImage' Kernels
+# for the ARM Kirkwood and other platforms using the U-Boot Linux loader.
+# No longer needed for 32bit nor 64bit ARM.
+#{ slackcheckpkgdeps u-boot-tools || installpkg $PKGSTORE/a/u-boot-tools-?[0-9]*.t?z || exit 99 ; }
+
+# udev, mdadm & lvm2 are included in the initrd so we need them installed
+# on the system (the mkinitrd script takes the versions from the running system)
+{ slackcheckpkgdeps eudev || installpkg $PKGSTORE/a/eudev-[0-9]*.t?z || exit 99 ; }
+{ slackcheckpkgdeps mdadm || installpkg $PKGSTORE/a/mdadm-[0-9]*.t?z || exit 99 ; }
+{ slackcheckpkgdeps lvm2 || installpkg $PKGSTORE/a/lvm2-[0-9]*.t?z || exit 99 ; }
+# DTC (Device Tree Compiler) is needed for ARM kernels since Linux 3.7.
+{ slackcheckpkgdeps device-tree-compiler || installpkg $PKGSTORE/d/device-tree-compiler-[0-9]*.t?z || exit 99 ; }
+# We use rsync to keep the DTBs in place:
+{ slackcheckpkgdeps rsync || installpkg $PKGSTORE/n/rsync-[0-9]*.t?z || exit 99 ; }
+
+export PKGNAM=kernel_$SLKKERNELARCH
+export SLACKPACKAGE=$PKGNAM-$VERSION-$PKGARCH-$BUILD.txz
+
+# Launch the package build script:
+BUILDLOG=$SLKPORTARCH-$( basename $SLACKPACKAGE .t?z ).build.log
+( ./kernel.SlackBuild $@ ) >& /dev/stdout | tee $BUILDLOG || exit 1
+
+# Compress the build log:
+bzip2 -9fvz $BUILDLOG

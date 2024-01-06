@@ -1,0 +1,83 @@
+############################################################################################
+# File....: slackwareaarch64-<ver>/source/k/sources/kmod-dirlist
+# Purpose : Collect the base directories and specific Linux Kernel Modules integrated into
+#           the Slackware OS InitRD and Installer.
+############################################################################################
+# List is produced by running '../scripts/list_loaded_kmod_dirs' on each supported
+# Hardware Model within the Slackware OS.
+#
+# The list undergoes filtering in the build process via '../scripts/slim-kmods-initrd',
+# distinguishing between constructing the OS InitRD and assembling the Installer.
+#
+# The reasoning behind this methodology is to encompass a broad range of common subsystems
+# found across various Hardware Models (such as USB, Ethernet, PCI). Subsequently, we refine
+# this selection by eliminating specific components unnecessary for booting the OS
+# (in the OS InitRD context) or installing Slackware (pertaining to the Installer).
+# Both the Installer and OS InitRD are designed as versatile, generic environments. As a
+# result, they are engineered to accommodate a wider spectrum of hardware, necessitating
+# a more comprehensive inclusion of components compared to tailored setups for specific
+# Hardware Models.
+#
+# These paths are relative to: /lib/modules/<kernel_version>-<arch>/kernel/
+# The 'tar' command processes this list using the '--wildcards' option, allowing you to
+# leverage its functionality.
+############################################################################################
+
+arch/arm64/crypto
+arch/arm64/lib
+block
+crypto
+drivers/ata
+drivers/base/regmap
+drivers/block
+drivers/bus
+drivers/cdrom
+drivers/char
+drivers/clk
+drivers/cpufreq
+drivers/crypto
+drivers/dma
+drivers/firmware
+drivers/gpio
+drivers/gpu
+drivers/hid
+drivers/hwmon
+drivers/i2c
+drivers/iio
+drivers/input
+drivers/input/misc
+drivers/md
+drivers/mfd
+drivers/media/cec
+drivers/media/common
+drivers/media/mc
+drivers/media/platform/rockchip/rga
+drivers/media/rc
+drivers/media/usb/uvc
+drivers/media/v4l2-core
+drivers/misc/eeprom
+drivers/mmc
+drivers/net
+drivers/nvme
+drivers/pci
+drivers/phy
+drivers/power/supply
+drivers/pwm
+drivers/regulator
+drivers/rtc
+drivers/scsi
+drivers/soc
+drivers/spi
+drivers/staging
+# RPi4 stuff: not sure we need this. to be checked.
+#drivers/staging/vc04_services
+#drivers/staging/vc04_services/bcm2835-audio
+#drivers/staging/vc04_services/bcm2835-camera
+#drivers/staging/vc04_services/vchiq-mmal
+drivers/thermal
+drivers/usb
+drivers/video
+drivers/watchdog
+fs
+lib
+net/

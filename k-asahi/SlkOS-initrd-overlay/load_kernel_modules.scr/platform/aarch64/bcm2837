@@ -1,0 +1,88 @@
+#################################################################################
+# Helper script: /load_kernel_modules.scr/platform/aarch64/bcm2837
+# Purpose......: Set the Kernel modules for Hardware Models that use the BCM2837
+#                SoC within the Slackware initial RAM disk ('OS initrd')
+#                and the Slackware installer.
+#                Currently supported Hardware Models:
+#                * Raspberry Pi 3
+#                This script is sourced from '/load_kernel_modules'
+# Author.......: Stuart Winter <mozes@slackware.com>
+# Date.........: 30-Mar-2021
+# Maintainer...: 
+#
+# Please use this as a reference and example of how to add support for
+# a new SoC to Slackware ARM/AArch64.
+#
+# Important Note:
+# * You must _append_ to the module lists (as this script does)
+#   otherwise the base set of modules will not be loaded and would result in
+#   a Kernel panic.
+# * The initrd uses the 'bash' shell, rather than 'busybox'
+#   (as in upstream/x86 Slackware). This allows you (for example)
+#   to use 'fallthrough' (case statements terminated with ';&'
+#   rather than ';;') within case statements and regular expression
+#   matches within 'if' statements.
+#   This permits the 'c'-style switch statements where you can
+#   'inherit' the previous matches as you move down the cases.
+#   This enables you to match on varients of boards, and inherit
+#   a 'baseline' of platform modules for that board.
+#
+# The 'PLATWALK' match is to enable build scripts to process these
+# scripts outside of the initrd environment and determine which
+# modules will be loaded by a particular Hardware Model.  This must remain
+# in place for all scripts.
+#################################################################################
+
+case $HWM in
+   "Raspberry Pi 3"*|PLATWALK)
+      platform_detected=1
+      SOC_NAME=bcm2837
+      # Set the short name that is used by /load_kernel_modules to install
+      # the appropriate configuration for modprobe for this Hardware Model.
+      # These files are stored within the source tree:
+      # source/k/SlkOS-initrd-overlay/usr/share/hwm-configure/platform/aarch64/modprobe.d/
+      #
+      # Note: Typically these are only used to blacklist particular modules from loading
+      # within the OS InitRD or Installer.  Within the OS the regular location of
+      # /lib/modprobe.d/ is used and has no connection to the content of the
+      # OS InitRD/Installer.
+      HWM_SHORTNAME=rpi3
+
+      echo "Architecture: ${ARCH}, Hardware model: ${HWM}, SoC: ${SOC_NAME}"
+      # If one of the modules within the base list is causing problems on
+      # your platform, here are the options laid out as examples:
+      # USB="${USB/ehci_orion/differentmodule}" # Substitute module 'ehci_orion' with 'differentmodule'
+      # USB="${USB/ehci_orion/}" # Remove the 'ehci_orion' module from the list
+      MOD_GPIO+="   "
+      # Drivers for PCI and other core sub systems:
+      MOD_PHY+="    bcm_phy_lib phy_generic"
+      # Video drivers:
+      MOD_VIDEO+="  simpledrm"
+      # MFD (Multi Functional Devices) drivers:
+      MOD_MFD+="    "
+      MOD_CARDS+="  sdhci-iproc bcm2835"
+      MOD_USB+="    dwc2"
+      MOD_NET+="    "
+      MOD_CMP+="    "
+      MOD_CRYPTO+=" "
+      # Example to detect hardware at runtime:
+      #{ lspci 2>/dev/null | grep -q 'SATA cont.*ATA' ;} && MOD_XX="$MOD_XX yyy"
+      # The following modules do not inherit:
+      MOD_RTC="rtc-ds1307 rtc-pcf8523" 
+      # Modules for the peripherals on the Hardware Model's main board
+      # (outside of the SoC itself)
+      MOD_HWM=""
+      # Modules for the IP blocks/peripherals embedded within the SoC:
+      MOD_SOC=""
+      ;;
+
+      # Note: The RPi3 will probably benefit from the same post-module-loading
+      # function as included within the RPi4's helper script, which initialises
+      # an RTC on the GPIO array.
+      # The RPi3 support is presently only supported to the basic level though,
+      # and this can enhancement can be added later when there are people
+      # with hardware and interest to test it.
+esac
+
+# The '/load_kernel_modules' script will load the modules
+# set above.

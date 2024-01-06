@@ -1,0 +1,2 @@
+udevadm info -a -n /dev/nvme0n1p1  | grep -oP 'DRIVERS?=="\K[^"]+'  
+

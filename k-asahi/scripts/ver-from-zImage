@@ -1,0 +1,5 @@
+# this does not work yet
+pos=$(grep -P -a -b -m 1 --only-matching '\x5D\x00\x00' /boot/zImage-armv7 | cut -f 1 -d :)
+echo $pos
+dd if=/boot/zImage-armv7 of=/tmp/out.gz bs=1 skip=$pos
+

@@ -1,0 +1,19 @@
+# /boot/local/load_kernel_modules.pre-modload
+#
+# This is a user-serviceable script that is executed within the
+# OS InitRD (Operating System Initial RAM Disk) subsequent to
+# setting the lists of Linux Kernel modules, but prior to loading
+# the modules into the Kernel.
+#
+# The purpose of this script is for users to adjust any of the module
+# lists prior to them being loaded.
+# This may be helpful if the standard lists are generally fine, but perhaps
+# one module is causing issues on your system and you'd need to remove it.
+#
+# In such cases, here are the options laid out as examples:
+USB="${USB/ehci_orion/differentmodule}" # Substitute module 'ehci_orion' with 'differentmodule'
+USB="${USB/ehci_orion/}" # Remove the 'ehci_orion' module from the list
+
+# If you have no such requirements and only want to load additional
+# modules within the initrd environment, you create the following script:
+# /boot/local/load_kernel_modules.post

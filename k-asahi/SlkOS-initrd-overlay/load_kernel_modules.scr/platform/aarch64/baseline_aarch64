@@ -1,0 +1,11 @@
+############################################################################
+# Helper script: /load_kernel_modules.scr/platform/aarch64/baseline_aarch64
+# Purpose......: Set any architecture-specific modules that are required for
+#                AArch64 only.
+# Called from..: This script is sourced from '/load_kernel_modules'
+# Author.......: Stuart Winter <mozes@slackware.com>
+# Date.........: 22-Apr-2021
+# Maintainer...: Stuart Winter <mozes@slackware.com>
+############################################################################
+
+MOD_BASE+=" cec crc32 uinput"

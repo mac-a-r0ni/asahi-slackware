@@ -1,0 +1,74 @@
+#!/bin/bash
+
+set +o posix
+shopt -s extglob
+
+# Kernel Module experimentation copy tool.
+# Purpose: To facilitate testing of the included Kernel modules
+# list by utilising an x86 Slackware machine to re-process
+# the Slackware AArch64 Installer.
+# This method offers a faster alternative to rebuilding the Installer
+# repeatedly.
+#
+# mozes@slackware.com
+# 02-Jan-2024
+
+# This assumes a number of things - don't run this without setting things up!
+
+# Mount your Slackware AArch64 Installer SD card at /mnt/floppy:
+SLKINSTSDCARD=/mnt/floppy/
+TMP=/tmp/slkinst-modify
+SLKA64K=/devel/armedslack/slackwareaarch64-current/source/k-wip/
+KMODSLIMMER=${SLKA64K}/scripts/slim-kmods-initrd
+
+KMODINCLUDELIST=${SLKA64K}/sources/kmod-dirlist
+#KMODINCLUDELIST=${SLKA64K}/sources/kmod-dirlist-PREV
+
+mountpoint -q ${SLKINSTSDCARD} || exit 1
+
+# Path to the new Kernel package:
+# We'll extract all Kernel modules from here, then
+# copy those listed in in ${KMODINCLUDELIST} into the
+# Slackware Installer file system:
+KERNPKG=/devel/armedslack/tmp/6.6/a/kernel-modules-armv8-6.6.8_armv8-aarch64-1.txz
+
+rm -rf $TMP
+mkdir -p $TMP/{tree,tmp}
+
+# Unpack the Kernel modules package into a temp space:
+tar xf $KERNPKG -C $TMP/tmp/ || exit 1
+# Determine the Kernel version:
+KVER=$( echo $TMP/tmp/lib/modules/* | sed 's/.*\///' )
+echo "Handling Kernel version: $KVER"
+
+# Unpack the Slackware Installer into the temporary space:
+pushd $TMP/tree || exit 1
+xzcat $SLKINSTSDCARD/initrd-armv8.img | cpio -di || exit 1
+# Clean out the Kernel modules:
+rm -rf lib/modules
+mkdir -vpm755 lib/modules/$KVER/kernel
+
+# Copy the indexes, etc. (everything other than the Kernel modules and the build/source symlinks):
+#cp -fa ${TMP}/tmp/lib/modules/${KVER}/!(build|kernel|source) lib/modules/${KVER}/
+cp -fav ${TMP}/tmp/lib/modules/${KVER}/modules.{order,builtin*} lib/modules/${KVER}/
+
+# Copy the listed Kernel modules into the Slackware Installer tree from
+# the temporary location into which they were unpacked:
+# Enter the temp area:
+cd $TMP/tmp/lib/modules/${KVER}/kernel || exit 1
+grep -Ev '^#|^$' ${KMODINCLUDELIST} | tar --wildcards -pvvcf - -T- | tar -C${TMP}/tree/lib/modules/${KVER}/kernel/ -pxf -
+# Slim them down:
+cd ${TMP}/tree/lib/modules/${KVER}/kernel/
+echo "Slimming..."
+. ${KMODSLIMMER}
+# Depmod:
+cd ${TMP}/tree
+echo "Depmod..."
+depmod -b . -a $KVER
+# Repack:
+echo "Repacking.."
+find . | cpio -o -H newc | xz --threads $(( $(nproc) -1 )) -vze9f -C crc32 > $SLKINSTSDCARD/initrd-armv8.img
+sync
+du -sh ${TMP}/tree/lib/modules
+
+echo "now umount the SD card"

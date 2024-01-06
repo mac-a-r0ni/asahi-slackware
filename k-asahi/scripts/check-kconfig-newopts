@@ -1,0 +1,6 @@
+# When merging in new config options from a new list, only output those
+# that aren't configured in the current config.
+cat /mnt/prisroot/tmp/T/build_test_kernels_mod/lx2k_additions.config | while read configopt ; do
+  grep -qE "^${configopt%=*}" ~/ac/source/k/configs/config-armv8 || echo $configopt
+done
+
