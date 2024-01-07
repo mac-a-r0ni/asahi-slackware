@@ -735,7 +735,7 @@ mkdir -vpm755 $PKG/{install,boot/dtb-$VERSION}
 ln -rvfs $PKG/boot/dtb-$VERSION $PKG/boot/dtb
 
 # Ensure that we're in the correct directory to build the DTB files.
-cd $KERNELSRCDIR/linux-$VERSION && make ARCH=$LINUXKERNELARCH dtbs || failmake
+cd $KERNELSRCDIR/linux-6.6-14 && make ARCH=$LINUXKERNELARCH dtbs || failmake
 
 # Install them to a temporary directory.  The make install
 # creates a 'dtbs' directory within the specified path.
@@ -784,7 +784,7 @@ echo "*****************************************************************"
 # Replace version number with a _ so it doesn't get confused with
 # the package name.
 # This is incase we're using any '-rc' releases.
-export VERSION="$( echo $VERSION | sed 's?-??g' )"
+#export VERSION="$( echo $VERSION | sed 's?-??g' )"
 
 cd $PKG
 
