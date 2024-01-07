@@ -1,0 +1,2 @@
+udevadm info -a -n /dev/mmcblk1p1  | grep -oP 'DRIVERS?=="\K[^"]+'  
+

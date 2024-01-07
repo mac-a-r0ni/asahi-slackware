@@ -1,0 +1,7 @@
+m1n1 (Asahi Linux Bootloader)
+
+m1n1 is the first link in the chain, able to bootload Linux systems
+on Apple Silicon-based hardware on a MacOS 12.1+ system. Able to cat
+m1n1 + kernel + dtb + initrd to create a payload to boot Linux.
+
+Homepage: https://asahilinux.org/

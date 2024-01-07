@@ -1,0 +1,2 @@
+udevadm info -a -n /dev/sda | grep -oP 'DRIVERS?=="\K[^"]+'  
+

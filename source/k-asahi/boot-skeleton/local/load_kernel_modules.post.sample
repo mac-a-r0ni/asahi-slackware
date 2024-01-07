@@ -1,0 +1,71 @@
+# /boot/local/load_kernel_modules.post
+#
+# This is a user-serviceable script that is executed within the
+# OS InitRD (Operating System Initial RAM Disk) subsequent to loading
+# the Linux Kernel modules.
+#
+# The purpose of this script is for users to load any particular modules
+# they require to boot their system within the initial boot stages.
+# However, it can be used for any other purpose as this is a bash
+# shell script that is run within the 'init' process directly.
+# Therefore, be careful what you put here.
+
+# Example:
+modprobe abcmodulexyz
+modprobe anothermodule
+modprobe andanother
+
+# Other options here are to initialise a peripheral that's attached
+# to the GPIO array.
+#
+# Example: Initialise an ds1307-based RTC on the GPIO pins.
+# Note that on the Raspberry Pi 4, this RTC is already
+# initialised by the bcm2711 Kernel Module Loader helper(*)
+# within the OS InitRD, and is only repeated here as an example
+# of the type of options available at this stage of the boot process.
+# * http://ftp.arm.slackware.com/slackwarearm/slackwareaarch64-current/source/k/SlkOS-initrd-overlay/load_kernel_modules.scr/platform/aarch64/bcm2711
+
+# Initialise it with the i2cdetect tool:
+#i2cdetect -y 1 > /dev/null 2>&1
+# If detected, provide the address to the Kernel interface so that
+# the RTC driver can find it:
+#[ -f /sys/class/i2c-adapter/i2c-1/new_device ] && echo ds1307 0x68 > /sys/class/i2c-adapter/i2c-1/new_device
+
+# Define a function to run from the OS InitRD's '/init' immediately prior
+# to switching into the Slackware OS proper.
+# This is after any software RAID arrays et al have been initialised.
+# There's no current use case for this, but it may be useful in the future.
+#
+# At this stage, the following paths for Slackware OS are mounted:
+# /proc, /sys, /run, /dev
+# The root file system ('/') is mounted under /mnt
+#
+#function hook_pre_switch_root() {
+#  echo "Just about to switch into the Slackware OS proper, leaving the OS InitRD"
+#  sleep 4
+#}
+
+# Capture the final list of modules that were loaded by the Kernel module
+# loader, prior to the OS booting.
+# This is a hack to help keep track of the core requirements for
+# a particular Hardware Model, for when we need to put the initrd's
+# on a diet.
+# Note: this example is an illustration of the types of things you can do at this
+# stage.
+#function hook_pre_switch_root() {
+#  echo "Just about to switch into the Slackware OS proper, leaving the OS InitRD"
+#  echo "Detecting module sub system names"
+#  mount -o remount rw /mnt
+#
+#cat << 'EOF' > /mnt/tmp/grab-mods
+#( awk '{print $1}' /proc/modules| while read mod ; do
+#   mfile=$( modinfo "${mod}" | grep -E '^filename:' | awk '{print $2}' )
+#   echo ${mfile%/*}
+#  done ) | sort | uniq | cut -d/ -f5- > /tmp/kernel-modules-within-initrd
+#
+#lsmod > /tmp/lsmod-os-initrd
+#EOF
+#
+#   chmod 755 /mnt/tmp/grab-mods
+#   chroot /mnt /tmp/grab-mods
+#}

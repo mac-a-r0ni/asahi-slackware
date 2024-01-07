@@ -1,0 +1,20 @@
+# kernel.SlackBuild helper 'source/k/platform/aarch64/nxp-layerscape'
+#
+# Note: This script is executed when the shell's working directory
+#       is set to the root of the OS InitRD.
+#
+# Hardware Models: SolidRun HoneyComb, lx2160acex7
+#
+echo "Adding 'restool' for SoCs leveraging NXP Layerscape into $PWD"
+tar xvvf $pkgstore/n/restool-+([^-])-+([^-])-+([^-]).t[gblx]z  usr/bin lib/udev/rules.d/20-sfp-honeycomb.rules
+# The Installer and OS InitRD has flock in /bin only:
+sed -i 's?/usr/bin/flock?/bin/flock?g' lib/udev/rules.d/20-sfp-honeycomb.rules
+
+# We need the symlinks that are contained within the package's post install script:
+# We could accomplish this without a 2nd extraction, but this serves as an example where
+# you may need to extract the package to a temporary location in order to achieve something
+# more complicated.
+mkdir -p $TMPBUILD/restool-extract
+tar xvvf $pkgstore/n/restool-+([^-])-+([^-])-+([^-]).t[gblx]z -C $TMPBUILD/restool-extract install/doinst.sh
+# Extract only the symlink creation code from the post installation scripts and execute it:
+grep -E '^\( cd .*(rm|ln)' $TMPBUILD/restool-extract/install/doinst.sh | bash

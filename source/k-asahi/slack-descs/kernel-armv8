@@ -1,0 +1,19 @@
+# HOW TO EDIT THIS FILE:
+# The "handy ruler" below makes it easier to edit a package description.  Line
+# up the first '|' above the ':' following the base package name, and the '|'
+# on the right side marks the last column you can put a character in.  You must
+# make exactly 11 lines for the formatting to be correct.  It's also
+# customary to leave one space after the ':'.
+
+            |-----handy-ruler------------------------------------------------------|
+kernel_armv8: Linux kernel for the 64-bit AArch64/ARM64 platform.
+kernel_armv8:
+kernel_armv8: This is a generic Linux kernel for systems that are powered by an
+kernel_armv8: ARM CPU that supports the ARMv8 or higher chip set.
+kernel_armv8: 
+kernel_armv8:
+kernel_armv8: 
+kernel_armv8: 
+kernel_armv8:
+kernel_armv8: Other drivers (such as additional file system support) may be
+kernel_armv8: loaded as modules.  See /etc/rc.d/rc.modules for examples.

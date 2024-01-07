@@ -1,9 +1,0 @@
-#!/bin/bash
-
-# Load all modules into the Kernel.
-# This is for bootstrapping Slackware ARM on to new Hardware Models.
-# See https://www.linuxquestions.org/questions/slackware-arm-108/slackware-arm-vm%27s-on-apple-m1-macs-4175694106/#post6433046
-# for more context.
-
-find /lib/modules/$(uname -r) -type f -name '*.ko.*' | while read mod; do modprobe $( basename $mod .ko.xz ) ; done
-

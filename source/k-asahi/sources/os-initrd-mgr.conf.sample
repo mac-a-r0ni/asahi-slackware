@@ -1,0 +1,62 @@
+##################################################################################################
+# Config file: /etc/os-initrd-mgr.conf
+# Purpose....: Configure os-initrd-mgr(8) and extend its functionality through user-defined
+#              functions that are executed at key events during the processing of the OS InitRD.
+##################################################################################################
+# To use this configuration file:
+# 1. Edit the override function to include the commands you want.
+# 3. As root:
+#    $ cd /etc
+#    $ mv os-initrd-mgr.conf.sample os-initrd-mgr.conf
+# 4. Re-pack the initrd:
+#    $ os-initrd-mgr
+#
+# Note: Once configured. this file will not be touched by any of the Slackware package management
+#       tool set.
+##################################################################################################
+
+# Synchronize the OS InitRD's Kernel modules with those presently loaded within the running OS.
+# This removes the full complement of modules. You may wish to do that if you want to pare down
+# the OS InitRD to make it load faster, but other than that there's no benefit.
+# This is not enabled by default.
+#
+# To persist this setting through Kernel package upgrades, the 'a/kernel-modules' package must
+# be upgraded before 'a/kernel' because the modules are copied from the live OS' /lib/modules
+#SYNC_LOADED_KMODS=No
+#SYNC_LOADED_KMODS=Yes
+
+# Define a function that is called immediately prior to os-initrd-mgr finalising the OS InitRD.
+# This is primarily aimed at developers who are onboarding new Hardware Models,
+# as this script can be dropped into /boot/local and can edit the content of
+# the OS InitRD, whilst offloading the heavy lifting of unpacking/repacking the
+# OS InitRD to os-initrd-mgr.
+#
+# This example is just to provide ideas about what you might want to do, and how to achieve it.
+
+# Open a shell within the root of the new OS InitRD.
+# You may wish to use this to manually hack on the content.
+# Exit the shell as normal and os-initrd-mgr will continue processing.
+#function override_pre_packinitrd() {
+#  # Enter the root of the OS InitRD:
+#  pushd $TMPDIR_OSINITRD_ROOT
+#  bash -l
+#  popd
+#}
+
+#function override_pre_packinitrd() {
+#  # Enter the root of the OS InitRD:
+#  # (this variable is set by os-initrd-mgr)
+#  pushd $TMPDIR_OSINITRD_ROOT
+#  # Remove some modules
+#  rm -rf lib/modules/*/xyz
+#  # Add some binaries to test new functionality:
+#  cp -fa /bin/foo bin/
+#  # Add some libraries:
+#  cp -fa /usr/lib64/libfoo.so usr/lib64/
+#  # Update linker and Kernel module cache:
+#  ldconfig -r .
+#  depmod -b .
+#  # Return to the previous directory prior to when this function
+#  # was called by os-initrd-mgr:
+#  popd
+#}

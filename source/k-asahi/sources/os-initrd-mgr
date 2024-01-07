@@ -1,0 +1,931 @@
+#!/bin/bash
+set +o posix
+
+# Copyright 2021, 2022  Stuart Winter, Donostia, Spain.
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+#########################################################################################
+# Program: /usr/sbin/os-initrd-mgr
+# Purpose: Manage the Slackware ARM / AArch64 OS InitRD.
+# Author : Stuart Winter <mozes@slackware.com>
+# Date...: 30-May-2022
+# Version: 1.07
+#########################################################################################
+# Changelog:
+# v1.07 - 26-May-2022
+# * Moved os-initrd-mgr.conf config file from /boot/local to /etc
+# * Add a safety check to prevent syncing Kernel modules across major versions and patch
+#   levels.
+#   A bypass option is available although strongly discouraged:
+# v1.06 - 23-May-2022
+# * Added -S, --sync-loaded-kmods to synchronize the OS InitRD's Kernel modules with those
+#   presently loaded within the Operating System.  This typically reduces the size of the
+#   OS InitRD significantly, improving the boot time.
+# * Added -m, --modprobe-synced-kmods to be used in conjunction with the above
+#   option, which enables loading all of the discovered modules in addition to those
+#   that are loaded as standard within the OS InitRD.
+# v1.05 - 21-Apr-2022
+# * Added -O, --os-inventory command line operator to create an inventory of the
+#   firmware within /run. The a/kernel-modules package calls it from its installation
+#   script.
+#   The purpose is that if the kernel-modules package is upgraded ahead of the kernel
+#   package, we run the risk of never having a freshly discovered list of firmware (since
+#   modinfo fails once the old Kernel modules have been removed from /lib/modules).
+# * Added -M, --manual-mods command line operator which immediately prior to re-packing
+#   the OS InitRD, outputs the temporary directory name containing the contents of the OS
+#   InitRD, and awaits user input to continue processing.
+#   This enables manual modification of the contents which may be useful for developers.
+# * Added support to execute a custom function immediately prior to re-packing the
+#   OS InitRD.  This is aimed at developers.
+#   See /etc/os-initrd-mgr.conf.sample
+# v1.04 - 18-Apr-2022
+# * Support situation where the a/kernel-modules package has been upgraded prior to
+#   the a/kernel package.  In this state the Kernel modules have been removed from
+#   the OS' /lib/modules causing 'modinfo' to fail.
+#   If there's an inventory cache from a previous invocation of os-initrd-mgr,
+#   fall back to that as the list of firmware to re-incorporate.
+# v1.03 - 17-Mar-2022
+# * Support adding firmware for loaded modules.
+# v1.02 - 20-Sep-2021
+# * Support /etc/mdadm.conf
+# v1.01 - 18-Aug-2021
+# * Added -F/--force-rebuild to enable easy removal of local customisations.
+#   If the Slackware ARM Kernel Module Loader local customisation files aren't
+#   present within /boot/local, remove them from the OS InitRD.
+# v1.00 - 20-May-2021
+##########################################################################################
+# Todo:
+# [1]
+# Automatically detect whether the mdadm.conf and other customisations should be
+# updated/removed using a file hash.
+# boot/.os-initrd-custs-inventory
+# Same manner as for firmware inventory.
+# This will enable os-initrd-mgr to avoid repacking the initrd when it's already
+# in sync, although os-initrd-mgr is only generally called after the Kernel package
+# was updated, or when the user made a change - hence why there's no inventory
+# caching presently. However, we need to do this prior to making the kernel-firmware
+# package trigger os-initrd-mgr.
+#
+# [2] Support deploying the modprobe config file from the OS InitRD into the
+# OS /etc/modprobe.d prior to pivoting into the OS proper.
+# Needs further thought. Where to store that file? /etc/modprobe.d and suck it
+# in, or /boot/local?
+# Needs thought about how to enable/disable the generic HWM modprobe config
+# using that file. Perhaps just a comment in the modprobe file to control the
+# logic?
+# [3]
+# For mdadm.conf it require extra handling though - don't include it if the file
+# is 100% comments.
+# Logic:
+# If mdadm.conf is within the OS InitRD but is absent within /etc, or copy in
+# /etc/ is pure comments:
+# remove from OS InitRD, remove entry from hash file.
+#
+# If mdadm.conf present within OS InitRD and /etc/, but has different hash:
+# re-include version from /etc, update entry in hash file.
+#
+# If mdadm.conf absent within OS InitRD, but present in /etc and isn't pure comments:
+# include within OS InitRD and add entry to hash file.
+#
+# At present /etc/mdadm.conf is only re-included or removed if local customisations
+# are found, or if -F was supplied.
+# This means that any /etc/mdadm.conf may be skipped during the Kernel package
+# upgrade process.
+# However, this is low priority since init tries to set up Software RAID by itself.
+#
+#########################################################################################
+
+# Silently exit if there's a flag present.  This is to avoid running within the
+# Slackware Installer environment.  Users may connect peripherals which may have
+# firmware that isn't present within the Installer's /lib/firmware.
+# All firmware required at install time is shipped for the Directly Integrated
+# Hardware Models, so there's no need to run os-initrd-mgr within that environment.
+# os-initrd-mgr *is* run from the Installer post OS installation, but is chrooted
+# into the new OS so that it can obtain firmware from the installed a/kernel-firmware
+# package.
+[ -f /.norun-os-initrd-mgr ] && exit 0
+
+# Test if getopt is available.  It's not available within the Slackware Installer
+# which is fine, since there's no need to run this tool during the initial
+# installation of the Kernel package.
+[ ! -x /bin/getopt ] && exit 0
+
+# /proc needs to be mounted:
+mountpoint -q /proc || { echo "Error: /proc is not mounted." ; exit 1 ;}
+
+# Version
+PROGNAME=os-initrd-mgr
+VERSION="${PROGNAME} v1.07 by Stuart Winter <mozes@slackware.com>"
+
+# Temporary space:
+TMPDIR="$( mktemp -d /tmp/os-initrd-mgr.XXXXXX )"
+# Temporary location into which the OS InitRD will be unpacked:
+TMPDIR_OSINITRD_ROOT="$TMPDIR/os-initrd-root"
+
+# Settings:
+BOOTDIR=/boot
+INITRDCUSTOMISATIONSDIR=$BOOTDIR/local
+FW_EXTRA=$BOOTDIR/local/extra_firmware
+INITRDDETAILS=$BOOTDIR/.boot_details
+INITRD_FW_INVENTORY=$BOOTDIR/.os-initrd-fw-inventory
+INITRD_KMOD_INVENTORY=$BOOTDIR/.os-initrd-kmod-inventory
+INITRD_KMOD_NAMES_INVENTORY=$BOOTDIR/.os-initrd-kmod-names-inventory
+OS_FW_INVENTORY=$TMPDIR/os-firmware-inventory
+OS_FW_INVENTORY_STORE=/run/os-initrd-mgr.fw-inventory
+OS_KMOD_INVENTORY_STORE=/run/os-initrd-mgr.kmod-inventory
+OS_KMOD_NAMES_INVENTORY_STORE=/run/os-initrd-mgr.kmod-names-inventory
+OSINITRD_CONF=/etc/os-initrd-mgr.conf
+SYNC_LOADED_KMODS=No
+MODPROBE_SYNCED_KMODS=No
+FORCEKMODSYNCMISMATCH=No
+BUILD_OS_INV_CACHE=No
+QUIETMODE=No
+FORCEREBUILD=No
+FORCE_FW_REPACK=No
+AWAIT_MANUALMODS=No
+# Kernel Module Loader customisation files:
+KMODLOADCUSTS="load_kernel_modules.pre load_kernel_modules.pre-modload \
+               load_kernel_modules.post"
+# Possible customisations (configs and scripts) that the user may
+# place within /boot/local for reincorporation into the OS InitRD:
+CUSTOMISATIONS="rootdev rootfs wait-for-root resumedev luksdev lukstrim \
+                lukskey keymap initrd-name \
+                $KMODLOADCUSTS"
+
+# Exit status:
+# 0  if OK
+# 1  any error.  There is no requirement to surface different codes
+#                as os-initrd-mgr is not designed to be called by any
+#                tool that will handle the effects of this tool in any
+#                manner.
+
+############################## Functions###################################
+
+# Determine whether a particular function is defined:
+function fnexists() {
+   local estat=1
+   type -t $1 >/dev/null && { [ $( type -t $1 ) = "function" ] && estat=0 ;}
+   return $estat
+}
+
+function display_usage () {
+   printf "Usage: ${PROGNAME} [options]\n"
+   printf "By default ${PROGNAME} will reincorporate into the OS Initial RAM\n"
+   printf "disk any local customizations found within ${INITRDCUSTOMISATIONSDIR},\n"
+   printf "and any firmware required for the loaded Linux Kernel modules.\n"
+
+   if [ ! -z "$1" ]; then
+      echo "Use $( basename $0 ) --help for a list of options"
+   fi
+}
+
+function display_help() {
+   printf "${VERSION}\n\n$( display_usage )
+
+Main options:
+ -F,   --force-rebuild
+                 Force rebuilding of the OS InitRD even when no local
+                 customisations are found or firmware updates available.
+                 If --sync-loaded-kmods is specified, the Kernel modules will
+                 be re-processed if possible (otherwise the existing modules
+                 within the OS InitRD will remain intact).
+ -f,   --force-fw-repack
+                 If there is a valid firmware inventory for the OS InitRD
+                 but no firmware is detected during the scan, by default
+                 the firmware within the OS InitRD will remain unmodified.
+                 This is to avoid removing what is most likely required
+                 firmware, since this situation should not normally
+                 occur.  This option forces the firmware to be re-packaged
+                 which may lead to a complete removal of all firmware
+                 within the OS InitRD (unless there is some included
+                 within ${FW_EXTRA}).
+ -h,   --help    Output this help text.
+ -M,   --manual-mods
+                 Immediately prior to re-packing the OS InitRD, output the
+                 name of the temporary working directory containing the new
+                 OS InitRD contents and await user confirmation before
+                 proceeding.  This enables manual modifications to the OS
+                 InitRD and is aimed at developers.
+ -O,   --os-inventory
+                 Discover and create an inventory of the live firmware and
+                 Kernel modules, then exit.  This is used by the kernel-modules package
+                 to aid in firmware handling during Kernel package upgrades.
+ -q,   --quiet   Surpress output messages, apart from fatal errors.
+                 This option is used by the kernel package's
+                 post installation script to surpress any messages
+                 attached to inaction on the part of this tool, with
+                 the intention of only supplying informative messages
+                 should any actions need to be taken.
+ -v,   --version Display version information.
+
+Kernel module synchronization options:
+ -S,   --sync-loaded-kmods Synchronize the OS InitRD's Kernel modules with those
+                 presently loaded within the Operating System.
+                 This typically reduces the size of the OS InitRD significantly,
+                 improving the boot time.
+       --force-kmod-sync-mismatch
+                 By default, the --sync-loaded-kmods only works when the running Kernel
+                 is the same major version and patch level as the Kernel contained within
+                 the Slackware Kernel package.  This mismatch occurs when upgrading the
+                 Kernel package from one major version to another.
+                 This option bypasses this safety mechanism, but is strongly discouraged
+                 as it may render the OS unbootable.
+ -m,   --modprobe-synced-kmods This is used in conjunction with --sync-loaded-kmods
+                 and enables loading each of the discovered Kernel modules found in
+                 the running OS.  Using this option will load the default set of Kernel
+                 modules contained within the generic OS InitRD first, then any additional
+                 modules.
+                 Note: this is experimental (and not the default).
+"
+}
+
+
+function cleanup() {
+   [ "$QUIETMODE" = "No" ] && echo "Cleaning up ..."
+   rm -rf $TMPDIR
+}
+
+# Inventory the Kernel module names.  These are used to generate
+# 'modprobe' lines to (within the OS InitRD environment) load the extra
+# modules that have been discovered within the running OS.
+function inventory_os_kmods_names() {
+  awk '{print $1}' /proc/modules
+}
+
+# Inventory the Kernel modules on the running OS, and store a hash
+# of each. This creates an inventory within /run
+function inventory_os_kmods() {
+   local mod
+   [ -f /proc/modules ] && {
+      while read mod; do
+#         echo ${mod#*/*/*/*/}
+#      done< <( while read module; do modinfo "${module}" | grep -E '^filename:' ; done< <( awk '{print $1}' /proc/modules ) | awk '{print $2}' ) ;}
+         echo "$( md5sum ${mod} | awk '{print $1}' ),${mod#*/*/*/*/}"
+      done< <( while read module; do modinfo "${module}" | grep -E '^filename:' ; done< <( awk '{print $1}' /proc/modules ) | awk '{print $2}' ) ;} | sort -t, -k2
+}
+
+# Determine how to handle --sync-loaded-kmods option
+# (replacing the generic set of Kernel modules with only those found within the
+# running OS).
+# Return status=0 : can't/won't process modules
+#              =1 : can process modules
+function handle_sync_loaded_kmods() {
+   local kmod_sync_status=1 # it'll be set to 0 if something fails/syncing is determined not to be required
+   local slkkernrunning=$( uname -r )
+
+    # Ensure that the variable 'slkkernel' is set.  This is configured
+    # within $INITRDDETAILS (/boot/.boot_details) by kernel.SlackBuild and contains the version
+    # of the Kernel.
+    if [ -z "$slkkernel" ]; then
+       [ "$QUIETMODE" = "No" ] && {
+          printf "Warning: Unable to determine Kernel version from ${INITRDDETAILS}\n"
+          printf "         Cannot synchronize Kernel modules: the existing Kernel\n"
+          printf "         modules within the OS InitRD will remain unchanged.\n" ;}
+          return 0
+    fi
+
+   # Ensure that /lib/modules for the packaged Kernel exists.
+   # This might not if you upgradepkg the a/kernel package ahead of a/kernel-modules.
+   [ ! -d /lib/modules/$slkkernel ] && {
+         [ "$QUIETMODE" = "No" ] && {
+            printf "Warning: Cannot find Kernel modules store /lib/modules/${slkkernel}.\n"
+            printf "         The existing Kernel modules within the OS InitRD will\n"
+            printf "         remain unchanged.\n" ;}
+         # Prevent using the cached copies since this tends to cause missing symbols
+         # in modules, if the a/kernel package was upgraded before a/kernel-modules.
+         # Removing them prevents os-initrd-mgr syncing the modules if the user
+         # runs it manually within the aforementioned context:
+         rm -f $OS_KMOD_INVENTORY_STORE $OS_KMOD_NAMES_INVENTORY_STORE
+         return 0 ;}
+
+   # Safety check for syncing across major Kernel version upgrades:
+   # It's possible that using the Kernel module dir path from the previous major version won't be a direct
+   # match and may cause a failure.  Whilst any missing modules will be trapped
+   # during the copy process, some modules in the new Kernel may require additional
+   # /new modules which aren't presently loaded, causing the original module
+   # to fail.
+   slkkernrunning="${slkkernrunning%.*}"
+   [ "${slkkernel%.*}" != "$slkkernrunning" -a "$FORCEKMODSYNCMISMATCH" = "No" ] && {
+      # No quiet mode since the user needs to be notified about this.  However, it's
+      # not a fatal error. When this situation occurs it's because the Slackware Kernel
+      # package contains a new major version. In this situation the user will receive the
+      # generic OS InitRD and must reboot before a sync.
+      echo "Warning: Major Kernel version change detected."
+      echo "Running Kernel = $slkkernrunning, incoming kernel = ${slkkernel%.*}"
+      echo "Unable to sync Kernel modules across major versions and patch levels."
+      echo "Kernel modules will remain unchanged."
+      echo "You should reboot into the new Kernel then re-sync the modules."
+      echo "You can use --force-kmod-sync-mismatch to override, but your system may not boot."
+      return 0 ;}
+
+   # Freshly discover modules or use a cached copy from a previous run:
+   if can_discover_kmods ; then
+      # modinfo is working, so let's scan the live modules:
+      # If there aren't any modules listed, these files will be empty
+      # although this would also indicate a broken system!
+      [ "$QUIETMODE" = "No" ] && printf "Scanning for Kernel modules ... \n"
+      # Create/refresh the inventories which we'll use as the source:
+      inventory_os_kmods > $OS_KMOD_INVENTORY_STORE
+      inventory_os_kmods_names > $OS_KMOD_NAMES_INVENTORY_STORE
+    else
+      # Both the Kernel module inventory caches should exist. We could perform the main
+      # sync task without loading those discovered modules from within the OS InitRD
+      # but let's assume that if both aren't present, there's a fault (as both really should).
+      if [ -s $OS_KMOD_INVENTORY_STORE -a -s $OS_KMOD_NAMES_INVENTORY_STORE ]; then
+         # modinfo failed the sanity test but we have an old inventory caches we can use
+         # as the source.
+         [ "$QUIETMODE" = "No" ] && printf "Warning: Unable to detect live modules; using cache.\n"
+        else
+         # Cannot discover the Kernel modules via /proc nor do we have one or both
+         # caches available from a previous run, so we cannot process Kernel modules
+         # during this invocation of os-initrd-mgr:
+         [ "$QUIETMODE" = "No" ] && {
+            printf "Warning: Unable to detect live modules and no cache found.\n"
+            printf "         Cannot synchronize Kernel modules: the existing Kernel\n"
+            printf "         modules within the OS InitRD will remain unchanged.\n"
+            return 0 ;}
+      fi
+   fi
+
+   # Check whether the stored inventory (within /boot) matches the running OS/cache:
+   # Inventory store (/boot) and cache (/run) are the same? no need to process them on this run
+   # (status =0). If they don't match, cmp exit=1. If file(s) don't exist, cmp's exit code=2
+   # Note: Since we're saying that both inventories need to exist, we should probably
+   # put some more logic around here to ensure that, but for the time being I think the
+   # exit codes from cmp will suffice for what we're doing here, and keeps the code
+   # logic simpler.
+   # Note: even though the caches don't include the kernel version, the module hashes change
+   # so this comparison will always be valid.
+   cmp -s $INITRD_KMOD_INVENTORY $OS_KMOD_INVENTORY_STORE && kmod_sync_status=0
+   cmp -s $INITRD_KMOD_NAMES_INVENTORY $OS_KMOD_NAMES_INVENTORY_STORE && kmod_sync_status=0
+
+   if [ "$FORCEREBUILD" = "Yes" ]; then
+      [ "$QUIETMODE" = "No" ] && echo "--force-rebuild specified - will synchronize Kernel modules."
+      # Force rebuild has been applied, so we'll resync:
+      kmod_sync_status=1
+     else
+      [ "$QUIETMODE" = "No" ] && {
+         [ $kmod_sync_status -eq 0 ] && printf "Kernel modules are already synchronized.\n" # , will not re-process without forcing (-F).\n"
+         [ $kmod_sync_status -eq 1 ] && printf "Kernel modules are out of sync, will process.\n" ;}
+   fi
+
+   # Return status 0 (don't process modules), or 1 (process modules):
+   return $kmod_sync_status
+}
+
+# Synchronize the running Kernel modules with those within the OS InitRD
+# (replacing the generic set with only those loaded within the running OS).
+function process_kmods_sync() {
+   local mod
+   local err=0
+   local modstagedir=$TMPDIR/kmod-stage
+
+   # Create staging area for modules:
+   mkdir -pm755 $modstagedir
+
+   # First let's try copying all of the discovered modules into a staging area.
+   # These files were populated earlier on within the 'handle_sync_loaded_kmods'
+   # function.
+   while read mod; do
+      [ -s /lib/modules/${mod} ] && cp -fH --parents /lib/modules/${mod} ${modstagedir} || err=1
+      # $OS_KMOD_INVENTORY_STORE contains the kernel modules without versioning, so we prefix
+      # the Kernel modules with /lib/modules/$slkkernel/ ($slkkernel is set within
+      # INITRDDETAILS=$BOOTDIR/.boot_details at package build time by kernel.SlackBuild).
+   done< <( awk -F, -v sk="$slkkernel" '{print sk"/"$2}' $OS_KMOD_INVENTORY_STORE )
+
+   # Were any errors encountered during copying the modules?
+   # If so, we'll bail out and leave the existing modules intact.
+   [ $err -gt 0 ] && {
+      [ "$QUIETMODE" = "No" ] && {
+         printf "Warning:  An error occurred during synchronization of the\n"
+         printf "          Kernel modules.  The existing set of Kernel modules\n"
+         printf "          within the OS InitRD will remain intact.\n" ;}
+         # failure
+         return 1 ;}
+
+   # Process the Kernel modules:
+   cd $TMPDIR_OSINITRD_ROOT
+   # Wipe the existing set:
+   rm -rf lib/modules
+   # Move the captured modules into place within the OS InitRD:
+   mv -f $modstagedir/lib/modules lib/
+   [ "$QUIETMODE" = "No" ] &&  printf "Updating Kernel module map...\n"
+   install -pm644 /lib/modules/$slkkernel/modules.{order,builtin*} lib/modules/$slkkernel/
+   depmod -b. $slkkernel
+
+   # Unless disabled, create a loader script that will modprobe each
+   # of the detected modules within the OS.
+   # This is loaded by OS InitRD's '/load_kernel_modules' script:
+   rm -f os_synced_kmods_loader
+   [ $MODPROBE_SYNCED_KMODS = "Yes" ] && sed -e 's/^/modprobe_once  /g' $OS_KMOD_NAMES_INVENTORY_STORE > os_synced_kmods_loader
+
+   # Create an inventory of the Kernel modules within the OS InitRD.
+   # We'll just copy the versions from versions in /run since they're
+   # the source of truth for the above operations and will be identical.
+   # No need to re-create these.
+   install -pm644 $OS_KMOD_NAMES_INVENTORY_STORE $INITRD_KMOD_NAMES_INVENTORY
+   install -pm644 $OS_KMOD_INVENTORY_STORE $INITRD_KMOD_INVENTORY
+}
+
+# Create an inventory of the firmware within the OS InitRD:
+function inventory_osinitrd_firmware() {
+   local fwfile
+   pushd $1 2>&1 > /dev/null
+   [ -d lib/firmware ] && {
+      ( while read fwfile; do
+          [ -f "${fwfile}" ] && { md5sum "${fwfile}" | sed 's/ \{1,\}/,\//g' ;}
+        done< <( find lib/firmware -printf "%p\n" ) ) | sort -t, -k2,2 ;}
+   popd 2>&1 > /dev/null
+}
+
+function inventory_os_firmware() {
+   local fwfile
+   [ -f /proc/modules ] && {
+         while read fwfile; do
+            [ -f "${fwfile}" ] && { md5sum "${fwfile}" | sed 's/ \{1,\}/,/g' ;}
+            # If they are missing from the OS, there's no reason to report them since
+            # we cannot copy them into the OS InitRD.
+            # We originally did this to help reduce the risk where some firmware
+            # went missing from the OS but was still within the OS InitRD.  However,
+            # some firmware is never shipped with Slackware and as such will always
+            # result in a mismatch between the inventory cache and the running state.
+            # [ -f "${fwfile}" ] && { md5sum "${fwfile}" | sed 's/ \{1,\}/,/g' ;} || printf "MISSING_ON_OS,${fwfile}\n"
+         done< <( while read module; do modinfo -F firmware "${module}" | sed -e 's?^?/lib/firmware/?g' ; done< <( awk '{print $1}' /proc/modules ) | sort -k2,2 ) ;}
+}
+
+function process_firmware() {
+   local fwlist=$TMPDIR/fwlist
+   local fwfile
+
+   cd $TMPDIR_OSINITRD_ROOT
+
+   # Store the previous cache for debugging purposes:
+   #[ -s $INITRD_FW_INVENTORY ] && cp -fa $INITRD_FW_INVENTORY $TMPDIR/
+
+   # If we have any firmware within the OS InitRD, save it:
+   # This works around the fact that modinfo presents what the module *will* attempt to load,
+   # but not what's necessarily available on the file system.
+   # This prevents losing any firmware that (for any reason) is no longer available within
+   # the OS /lib/firmware.  However, upon upgrading the a/kernel package, you'd lose the
+   # firmware if it's not present within the generic initrd img shipped within that package.
+   #
+   # Note: the above made sense when we were tracking firmware that was applicable but wasn't
+   # present within the OS' /lib/firmware, but on some Hardware Models we don't ship all
+   # possible firmware and as such we'll continuously be in an out-of-sync state with no
+   # remedy.  Should this change, the extra checks here will help, so they're being
+   # left in.
+   [ -d lib/firmware ] && mv -f lib/firmware $TMPDIR/
+   # Add any firmware discovered on the running OS:
+   # The format is hash,fwfile so we lop off the first column leaving us with
+   # only the firmware list:
+   [ -s $OS_FW_INVENTORY ] && sed -e 's/^.*,//g' $OS_FW_INVENTORY > $fwlist
+   # We don't re-add anything from the previous firmware cache.
+   # If you want to hard code any, use the local customisation:
+   # Build the list of firmware we'll include within the OS InitRD:
+   # Add any extra firmware specified within a local customisation:
+   [ -s $FW_EXTRA ] && sed -n '\?^/lib/firmware/?p' $FW_EXTRA >> $fwlist
+   mkdir -pm755 lib/firmware
+   while read fwfile ; do
+     # Copy from the saved stash first:
+      [ -s $TMPDIR/firmware/${fwfile} ] && {
+         pushd $TMPDIR/firmware/ 2>&1 > /dev/null
+         cp -fH --parents ${fwfile} $TMPDIR_OSINITRD_ROOT/lib/firmware/
+         popd 2>&1 > /dev/null ;}
+      # Copy from the OS' file system if present:
+      [ -s /lib/firmware/$fwfile ] && cp -fH --parents /lib/firmware/$fwfile $TMPDIR_OSINITRD_ROOT/
+   done< <( [ -s $fwlist ] && sort $fwlist | uniq | sed 's?/lib/firmware/??g' )
+   # Create a new OS InitRD firmware inventory:
+   inventory_osinitrd_firmware . > $INITRD_FW_INVENTORY
+}
+
+# Determine if we can discover the loaded Kernel modules:
+function can_discover_kmods() {
+   modinfo $( awk 'NR==1{print $1}' /proc/modules 2>/dev/null ) >/dev/null 2>&1 && return 0 || return 1
+}
+
+# Handle firmware:
+function handle_firmware() {
+   local fw_status
+   local fallback_fw_cache
+
+   # Note: the Slackware kernel package doesn't ship a firmware inventory
+   # because whilst there is firmware included, the firmware is typically
+   # _conditionally_ loaded depending upon the Hardware Model.
+   # If we find loaded/applicable firmware during our scan here, we'll
+   # re-include it plus any others, rebuild the OS InitRD and populate
+   # the inventory.
+   #
+   # Create an inventory of any firmware required by the loaded
+   # Linux Kernel modules:
+   [ "$QUIETMODE" = "No" ] && printf "Scanning for loaded firmware ... \n"
+
+   # To process firmware we require the Kernel /proc interface to scan for Kernel modules
+   # and to be able to inspect the loaded modules:
+   # Handle the situation where modinfo doesn't work because the kernel modules
+   # have been removed (the a/kernel_modules package was upgraded before the a/kernel package).
+   # We sanity test using modinfo against the first module in the list.
+   if can_discover_kmods ; then
+      # modinfo is working, so let's scan the live modules:
+      # If there isn't any firmware listed, this file will be empty.
+      inventory_os_firmware > $OS_FW_INVENTORY
+      fallback_fw_cache=0
+      # Since we have freshly discovered the firmware, let's update os-initrd-mgr's
+      # OS cache.
+      # This will enable us to have a more recent copy to handle the situation where
+      # a/kernel-modules is upgraded ahead of the kernel base package.
+      install -pm644 $OS_FW_INVENTORY $OS_FW_INVENTORY_STORE
+     else
+        if [ -s $INITRD_FW_INVENTORY -o -s $OS_FW_INVENTORY_STORE ]; then
+           # modinfo failed the sanity test but we have an old inventory cache we can use
+           # as the source.
+           [ "$QUIETMODE" = "No" ] && {
+              #printf "Warning: /proc is not mounted or modules are unavailable.\n"
+              #printf "         Cannot get live firmware status; using cache.\n" ;}
+              printf "Warning: Unable to detect live firmware; using cache.\n" ;}
+
+           # Move a previous inventory into place, as if we'd just performed a live scan:
+           # This will set state=1 or 2 below.
+           fallback_fw_cache=1
+           # If $INITRD_FW_INVENTORY does not exist (as indeed it may not), the -nt operator
+           # acts as if $OS_FW_INVENTORY_STORE is newer, so we'll use it:
+           if [ -s $OS_FW_INVENTORY_STORE -a $OS_FW_INVENTORY_STORE -nt $INITRD_FW_INVENTORY ]; then
+              # The stored cache (as created by the -O operator) is newer than the OS InitRD firmware
+              # inventory, so we'll use this.  This would typically be because the a/kernel-modules
+              # package had just been upgraded ahead of the a/kernel package:
+              cp -f $OS_FW_INVENTORY_STORE $OS_FW_INVENTORY
+             else
+              # The stored OS InitRD firmware inventory cache is newer (or there's no $OS_FW_INVENTORY_STORE),
+              # so we'll use that:
+              [ -s $INITRD_FW_INVENTORY ] && cp -f $INITRD_FW_INVENTORY $OS_FW_INVENTORY
+            fi
+          else
+            # modinfo failed the sanity test and there's no stale firmware inventory.
+            # There's nothing more we can or need to do.  This is a harmless state since it implies
+            # that there's no firmware that should be re-incorporated (as there was none previously).
+            # We simply need to report it to the user.
+            # This will set state=0 below.
+            [ "$QUIETMODE" = "No" ] && {
+               #printf "Warning: /proc is not mounted or modules are unavailable and no previous\n"
+               printf "Warning: Unable to detect live firmware and no inventory cache exists.\n"
+               printf "         Firmware will not be processed: any firmware within the existing\n"
+               printf "         OS InitRD will remain unchanged.\n" ;}
+          fi
+   fi
+
+   # States of firmware sync between OS InitRD and running OS:
+   # 0 = no initrd fw cache, no firmware required based on running state.
+   #   Action: nothing
+   fw_status=0
+
+   # 1 = initrd fw cache == firmware detected in running state.
+   #   Action: nothing
+   [ -s $INITRD_FW_INVENTORY -a -s $OS_FW_INVENTORY ] && {
+      cmp -s $OS_FW_INVENTORY $INITRD_FW_INVENTORY && {
+         [ "$QUIETMODE" = "No" ] && printf "Firmware is already synchronized.\n" # , will not re-process without forcing (-F).\n"
+         fw_status=0 ;} ;}
+
+   # 2 = (no initrd fw cache?) fw detected in running state.
+   #   Action: add fw to initrd, populate fw cache
+   [ ! -s $INITRD_FW_INVENTORY -a -s $OS_FW_INVENTORY ] && {
+      fw_status=1
+      [ "$QUIETMODE" = "No" ] && {
+         [ $fallback_fw_cache -eq 0 ] && {
+            printf "Loaded firmware detected but no firmware inventory cache; will process.\n" ;} ;} ;}
+
+   # 3 = initrd fw cache != detected runtime state (but there is *some* firmware)
+   #     This state occurs when:
+   #     * modules have been loaded/unloaded
+   #     * firmware file in /lib/firmware was changed (due to an upgrade of a/kernel-firmware package)
+   #     * firmware file in /lib/firmware has been DELETED
+   #       (this isn't presently surfaced though: the OS InitRD will be rebuilt
+   #        using a copy of the missing fw from within the OS InitRD if possible.
+   #        We don't restore any missing firmware into the OS).
+   #   Action: refresh/update firmware within initrd, re-populate fw cache
+   [ -s $INITRD_FW_INVENTORY -a -s $OS_FW_INVENTORY ] && {
+      cmp -s $OS_FW_INVENTORY $INITRD_FW_INVENTORY || {
+         [ "$QUIETMODE" = "No" ] && printf "Firmware is out of sync, will re-process.\n"
+         fw_status=1 ;} ;}
+
+   # 4 = initrd fw cache, no fw detected in running state
+   #   This indicates a problem with the running state, as it'd have
+   #   required someone to have rmmod'ded the modules that were originally
+   #   loaded by the OS InitRD, or that some other misfortune had bestowed
+   #   its itself upon the OS.
+   #   Action: nothing by default.  Force is required.
+   [ -s $INITRD_FW_INVENTORY -a ! -s $OS_FW_INVENTORY ] && {
+         [ "$FORCE_FW_REPACK" = "Yes" ] && {
+            printf "Warning: firmware exists within the OS InitRD but none\n"
+            printf "has been found in the running OS.\n"
+            printf "The command line operator '--force-fw-repack' has been specified,\n"
+            printf "firmware will be re-processed\n"
+            fw_status=1 ;} || {
+            printf "Warning: firmware exists within the OS InitRD but none\n"
+            printf "has been found in the running OS.\n"
+            printf "To force re-processing the firmware, supply the\n"
+            printf "command line operator '--force-fw-repack' to os-initrd-mgr.\n"
+            printf "The firmware within the OS InitRD firmware will remain unmodified.\n"
+            fw_status=0 ;} ;}
+
+   # 5 = no firmware sync required, but user wants to include firmware listed within
+   #     /boot/local/extra_firmware
+   #     If there's an issue, they'll have been warned above already.
+   [ "$FORCE_FW_REPACK" = "Yes" ] && fw_status=1
+
+   return $fw_status
+}
+
+
+function unpackinitrd() {
+   local initrdfile="$1"
+   local decomp='xz -dc'
+   if [ -s $initrdfile ]; then
+      mkdir -pm755 $TMPDIR_OSINITRD_ROOT
+      cd $TMPDIR_OSINITRD_ROOT
+      [ "$QUIETMODE" = "No" ] && echo "Unpacking $initrdfile ..."
+      # Determine whether the OS InitRD is compressed with gzip.  This is to enable the
+      # transition to LZMA compression:
+      ( file -L $initrdfile | grep -q 'gzip compressed' ) && { decomp='gunzip -dc' ;}
+      $decomp $initrdfile | cpio --quiet -di
+      return $?
+    else
+      echo "Error: $initrdfile does not exist or is of zero bytes."
+      return 1
+   fi
+}
+
+# In theory we shouldn't have any issues repacking the initrd
+# (at least from a storage capacity perspective) because we're
+# unpacking outside of /boot, and we're only adding scripts to the
+# initrd, and we're repacking in place.
+function packinitrd() {
+   local found_customisations=$1
+   local initrdfile="$2"
+   local bootdetailsfile="$3"
+   local bootcustomisationsdir="$4"
+   local initrdsize
+   local customisation
+
+   cd $TMPDIR_OSINITRD_ROOT
+   #printf "Adding customisation script:"
+   # There may be no customisations if --force-rebuild was set.
+   # Handle all customisations - Kernel Module Loader and initrd config files:
+   if [ $found_customisations -eq 1 ]; then
+      [ "$QUIETMODE" = "No" ] && printf "Adding customisations ...\n"
+      for customisation in $CUSTOMISATIONS ; do
+         if [ -f $bootcustomisationsdir/$customisation ]; then
+            #printf " $customisation"
+            install -pm644 $bootcustomisationsdir/$customisation . # config lives in the OS InitRD's root directory.
+         fi
+      done
+   fi
+
+   # Handle the case where there are Kernel Module Loader customisation
+   # scripts within the unpacked initrd, but not present within the OS' /boot/local
+   # This indicates that the user wants to remove them, and will have supplied
+   # the -F option to os-initrd-mgr
+   # Our PWD is presently the root of the OS InitRD:
+   # TOFIX: Note: we cannot remove the initrd customisations because /sbin/init
+   #        performs no sanity checking on the presence of those files.
+   #        This requires a patch to be merged upstream, but should be simple.
+   for customisation in $KMODLOADCUSTS ; do
+      if [ -f $customisation -a ! -f $bootcustomisationsdir/$customisation ]; then
+         [ "$QUIETMODE" = "No" ] && printf "Removing customisation script from the OS InitRD: $customisation\n"
+         rm -f $customisation
+      fi
+   done
+
+   # Include RAID support in initrd
+   # Note: Slackware ARM/AArch64 OS InitRD ships /etc/mdadm.conf by default
+   #       because the mkinitrd tool packages it plus the binaries and udev rule.
+   if [ -s /etc/mdadm.conf ] ; then
+      # By default Slackware ships a fully commented mdadm.conf, so
+      # before copying it to the OS InitRD, we'll check if it's a functional
+      # config:
+      if grep -Eqv '^#' /etc/mdadm.conf ; then
+         [ "$QUIETMODE" = "No" ] && printf "Installing /etc/mdadm.conf\n"
+         cp -fa /etc/mdadm.conf etc/
+      fi
+     else
+      # /etc/mdadm.conf is managed within the OS. If that file is absent yet there
+      # is a copy within the OS InitRD, this indicates RAID support is no longer
+      # required.
+      if [ -s etc/mdadm.conf ]; then
+         [ "$QUIETMODE" = "No" ] && printf "/etc/mdadm.conf no longer present, removing from the OS InitRD\n"
+         rm -f etc/mdadm.conf
+      fi
+   fi
+
+   [ "$QUIETMODE" = "No" ] && printf "Repacking $initrdfile ...\n"
+   initrdsize=$( du -sb . | awk '{print $1}' )
+   # Update the size information:
+   sed -i 's?^initrdsize=.*?initrdsize='"$initrdsize"'?g' $bootdetailsfile
+   # Pack:
+   find . | cpio --quiet -o -H newc | gzip -9f > $initrdfile
+   # awaiting kernel.SlackBuild and Linux 6.1 testing and checking scripts and docs for zcat examples/usage.
+   # this also takes about 3.5 mins to compress compared to about 1 minute for gz.
+   #find . | cpio --quiet -o -H newc | xz --threads $(( $(nproc) -1 )) -z9f -C crc32 > $initrdfile
+   return $?
+}
+
+function preallocate() {
+  local tmpdir=$1
+  local size=$2
+  local exitval
+  mkdir -p $tmpdir
+  fallocate -l $size $tmpdir/testfile-$size > /dev/null 2>&1
+  exitval=$?
+  rm -f $tmpdir/testfile-$size
+  return $exitval
+}
+
+###############################################################################
+
+# Trap errors and clean up:
+trap cleanup 1 2 14 15 # trap CTRL+C and kill
+
+PARAMS="$( getopt -qn "$( basename $0 )" -o M,O,h,q,v,F,f,S,m -l manual-mods,os-inventory,help,quiet,version,force-rebuild,force-fw-repack,sync-loaded-kmods,force-kmod-sync-mismatch,modprobe-synced-kmods -- "$@" )"
+# If params are incorrect then
+if [ $? -gt 0 ]; then display_help ; exit 2 ; fi
+eval set -- "${PARAMS}"
+for param in $*; do
+  case "$param" in
+     -F|--force-rebuild) FORCEREBUILD=Yes
+                   shift 1;;
+     -f|--force-fw-repack) FORCE_FW_REPACK=Yes
+                   shift 1;;
+     -h|--help)    display_help ; exit ;;
+     -M|--manual-mods) AWAIT_MANUALMODS=Yes
+                   shift 1;;
+     -O|--os-inventory) BUILD_OS_INV_CACHE=Yes
+                   shift 1;;
+     -q|--quiet)   QUIETMODE=Yes
+                   shift 1;;
+     -v|--version) printf "${VERSION}\n" ; exit;;
+     -S|--sync-loaded-kmods) SYNC_LOADED_KMODS=Yes
+                   shift 1;;
+     -m|--modprobe-synced-kmods) MODPROBE_SYNCED_KMODS=Yes
+                   shift 1;;
+     --force-kmod-sync-mismatch) FORCEKMODSYNCMISMATCH=Yes
+                   shift 1;;
+     --) shift; break;;
+  esac
+done
+
+# If available, source a local os-initrd-mgr configuration script.
+# This enables users to hook into certain key events within the process of managing
+# the OS InitRD.
+# This configuration file overrides defaults and command line options.
+[ -s $OSINITRD_CONF ] && {
+  [ "$QUIETMODE" = "No" ] && echo "Loading os-initrd-mgr configuration script"
+  . $OSINITRD_CONF ;}
+
+# Handle creating a firmware inventory.
+# This is a non-combinational option, so we exit after processing.
+[ "$BUILD_OS_INV_CACHE" = "Yes" ] && {
+  # Ensure modinfo is working:
+  if can_discover_kmods ; then
+     [ "$QUIETMODE" = "No" ] && printf "Creating firmware inventory ... \n"
+     inventory_os_firmware > $OS_FW_INVENTORY_STORE
+     [ "$QUIETMODE" = "No" ] && printf "Creating Kernel module inventory ... \n"
+     inventory_os_kmods > $OS_KMOD_INVENTORY_STORE
+     inventory_os_kmods_names > $OS_KMOD_NAMES_INVENTORY_STORE
+     cleanup > /dev/null
+     exit 0
+   else
+     [ "$QUIETMODE" = "No" ] && printf "Error: cannot address Kernel module information via /proc interface, unable to create inventory.\n"
+     cleanup > /dev/null
+     exit 1
+ fi ;}
+
+# Check if we have the boot details.  We need these to
+# determine whether we can safely unpack the OS Init RD:
+# I may add this to the scope of the --force-rebuild option here at some point.
+[ ! -s $INITRDDETAILS ] && {
+   echo "Error: unable to locate details file $INITRDDETAILS"
+   echo "       You may need to reinstall the kernel package."
+   cleanup > /dev/null
+   exit 1 ;}
+
+# Load in the details file:
+. $INITRDDETAILS || exit 1
+
+# We'll detect the platform now, but it should also be included within
+# /boot/.boot_details
+# Note: This may need to be changed for armv9 - depends if the marketing name
+# remains 'aarch64'.
+[ -z "$platform" ] && {
+   case "$( uname -m )" in
+      arm*)    platform="armv7";;
+      aarch64) platform="armv8";;
+      i?86)    platform="x86";;
+      *)       platform=$( uname -m );;
+   esac ;}
+
+# Versionless symlink to the OS InitRD:
+# On ARM / AArch64 the file name is /boot/initrd-armv{7,8}
+OSINITRDFILE=$BOOTDIR/initrd-$platform
+
+# Discover how to handle any firmware:
+handle_firmware
+process_firmware=$?
+
+# Determine if we need to sync the running modules with those within
+# the OS InitRD (replacing the generic set):
+# We only do this if -S|--sync-loaded-kmods is supplied.
+process_kmod_sync=0
+[ "$SYNC_LOADED_KMODS" = "Yes" ] && {
+   handle_sync_loaded_kmods
+   process_kmod_sync=$? ;}
+
+# Check if there are any local customisations:
+found_customisations=0
+
+[ "$QUIETMODE" = "No" ] && printf "Searching for local customisations ... "
+for customisation in $CUSTOMISATIONS ; do
+   if [ -f $INITRDCUSTOMISATIONSDIR/$customisation ]; then
+      [ "$QUIETMODE" = "No" -a $found_customisations -eq 0 ] && printf "\n"
+      [ "$QUIETMODE" = "No" ] && printf "Found: $INITRDCUSTOMISATIONSDIR/$customisation\n"
+      found_customisations=1
+   fi
+done
+
+if [ $found_customisations -eq 0 -a $process_firmware -eq 0 -a $process_kmod_sync -eq 0 -a "$FORCEREBUILD" = "No" ]; then
+   [ "$QUIETMODE" = "No" ] && printf " none found, quitting.\n"
+   cleanup > /dev/null
+   # It's not an error not to have local customisations or firmware changes; it just means
+   # that this script has no actions to take by default.
+   exit 0
+ else
+   [ "$QUIETMODE" = "No" ] && printf "\n"
+fi
+
+# initrdsize is set within the boot details file (the file name is
+# set within the $INITRDDETAILS variable).
+#
+preallocate $TMPDIR $initrdsize
+if [ $? -gt 0 ]; then
+   echo "Error: Insufficient temporary storage capacity to extract"
+   echo "       the OS Init RD ($initrdsize bytes required)"
+   cleanup > /dev/null
+   exit 1
+fi
+
+unpackinitrd $OSINITRDFILE $INITRDDETAILS
+if [ $? -gt 0 ]; then
+   echo "Error: Unable to successfully unpack the OS InitRD to"
+   echo "       temporary storage"
+   echo "       See the error messages above and take corrective"
+   echo "       action."
+   cleanup > /dev/null
+   exit 1
+fi
+
+[ $process_firmware -eq 1 ] && {
+   [ "$QUIETMODE" = "No" ] && printf "Processing firmware ... \n"
+   process_firmware ;}
+
+[ $process_kmod_sync -eq 1 ] && {
+   [ "$QUIETMODE" = "No" ] && printf "Synchronizing Kernel modules ... \n"
+   process_kmods_sync ;}
+
+# If defined within the os-initrd-mgr overrides script, call it now.
+fnexists override_pre_packinitrd && {
+   [ "$QUIETMODE" = "No" ] && echo "Executing 'override_pre_packinitrd' function"
+   override_pre_packinitrd ;}
+
+# If the user specified -M,--manual-mods we'll pause to allow them to
+# make their changes.
+[ "$AWAIT_MANUALMODS" = "Yes" ] && {
+   echo "Awaiting manual intervention"
+   echo "OS InitRD temporary working directory: $TMPDIR_OSINITRD_ROOT"
+   read -p "Press ENTER to continue" ;}
+
+packinitrd $found_customisations $OSINITRDFILE $INITRDDETAILS $INITRDCUSTOMISATIONSDIR
+if [ $? -gt 0 ]; then
+   echo "Warning: The OS InitRD may be corrupt."
+   echo "         You may need to ensure that there is adequate storage"
+   echo "         ($initrdsize bytes) within $BOOTDIR and reinstall the"
+   echo "         kernel package."
+   cleanup
+   exit 1
+ else
+   [ "$QUIETMODE" = "No" ] && echo "Successfully rebuilt the OS InitRD."
+   cleanup > /dev/null
+   exit 0
+fi

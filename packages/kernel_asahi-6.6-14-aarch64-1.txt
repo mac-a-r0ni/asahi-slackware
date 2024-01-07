@@ -1,0 +1,11 @@
+kernel_asahi: Linux kernel for the 64-bit AArch64/ARM64 platform.
+kernel_asahi:
+kernel_asahi: This is a generic Linux kernel for systems that are powered by an
+kernel_asahi: ARM CPU that supports the armv8 or higher chip set.
+kernel_asahi:
+kernel_asahi:
+kernel_asahi:
+kernel_asahi:
+kernel_asahi:
+kernel_asahi: Other drivers (such as additional file system support) may be
+kernel_asahi: loaded as modules.  See /etc/rc.d/rc.modules for examples.

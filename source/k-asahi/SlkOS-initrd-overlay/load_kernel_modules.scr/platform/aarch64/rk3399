@@ -1,0 +1,140 @@
+###############################################################################
+# Helper script: /load_kernel_modules.scr/platform/aarch64/rk3399
+# Purpose......: Set the Kernel modules for Hardware Models that use the RK3399
+#                SoC within the Slackware initial RAM disk ('OS initrd')
+#                and the Slackware installer.
+#                Currently supported Hardware Models:
+#                * Rock Pro 64
+#                This script is sourced from '/load_kernel_modules'
+# Author.......: Stuart Winter <mozes@slackware.com>
+# Date.........: 30-Mar-2021
+# Maintainer...: Stuart Winter <mozes@slackware.com>
+#
+# Please use this as a reference and example of how to add support for
+# a new SoC to Slackware ARM/AArch64.
+#
+# Important Note:
+# * You must _append_ to the module lists (as this script does)
+#   otherwise the base set of modules will not be loaded and would result in
+#   a Kernel panic.
+# * The initrd uses the 'bash' shell, rather than 'busybox'
+#   (as in upstream/x86 Slackware). This allows you (for example)
+#   to use 'fallthrough' (case statements terminated with ';&'
+#   rather than ';;') within case statements and regular expression
+#   matches within 'if' statements.
+#   This permits the 'c'-style switch statements where you can
+#   'inherit' the previous matches as you move down the cases.
+#   This enables you to match on varients of boards, and inherit
+#   a 'baseline' of platform modules for that board.
+#
+# The 'PLATWALK' match is to enable build scripts to process these
+# scripts outside of the initrd environment and determine which
+# modules will be loaded by a particular Hardware Model.  This must remain
+# in place for all scripts.
+###############################################################################
+# 06-Jun-2022: Removed module typec_extcon as it no longer exists in Linux 5.18.
+
+# $HWM is set by the caller ('/load_kernel_modules') of this helper script
+# and the value is taken from /proc/device-tree/model.
+# If your Hardware Model does not have a /proc/device-tree/model interface
+# (such as QEMU), see the 'virt-qemu' loader script for the other Hardware
+# Model detection method.
+#
+# Note: The '*' is used because there is >1 version of the RockPro64, but
+# the Kernel modules required are the same.
+# Note: The value of $HWM is taken from the /proc/device-tree/model interface.
+case $HWM in
+   "Radxa ROCK Pi 4"*|"Pine64 PinePhonePro"*|"Pine64 RockPro64"*|"Pine64 Pinebook Pro"*|PLATWALK)
+      platform_detected=1
+      SOC_NAME=rk3399
+      echo "Architecture: ${ARCH}, Hardware model: ${HWM}, SoC: ${SOC_NAME}"
+      # If one of the modules within the base list is causing problems on
+      # your platform, here are the options laid out as examples:
+      # USB="${USB/ehci_orion/differentmodule}" # Substitute module 'ehci_orion' with 'differentmodule'
+      # USB="${USB/ehci_orion/}" # Remove the 'ehci_orion' module from the list
+      MOD_GPIO+="   gpio_rockchip"
+      # Drivers for PCI and other core sub systems:
+      MOD_PHY+="    pcie_rockchip_host phy_rockchip_pcie phy_rockchip_emmc \
+                    phy_rockchip_inno_usb2 phy_rockchip_pcie phy_rockchip_typec"
+      # Video/display drivers:
+      MOD_VIDEO+="  pwm_bl drm dw_hdmi dw_mipi_dsi analogix_dp drm_dp_aux_bus rockchipdrm panel_edp panfrost panel_simple"
+      # MFD (Multi Functional Devices) drivers:
+      MOD_MFD+="    rk8xx_spi rk8xx_i2c rk8xx_core"
+      # For SDHC/MMC storage:
+      MOD_CARDS+="  dw_mmc dw_mmc_pltfm dw_mmc_rockchip sdhci_of_arasan"
+      # Drivers for USB hardware for this particular Hardware Model:
+      MOD_USB+="    dwc3 dwc3_of_simple"
+      # Ethernet network driver:
+      MOD_NET+="    rk_gmac-dwmac" 
+      # Any modules related to compression/decompression and cryptography
+      MOD_CMP+="    "
+      MOD_CRYPTO+=" rk_crypto"
+      # Example to detect hardware at runtime:
+      #{ lspci 2>/dev/null | grep -q 'SATA cont.*ATA' ;} && MOD_XX+=" yyy"
+
+      # The following modules do not inherit from the parent loader '/load_kernel_modules'
+      MOD_RTC="rtc_rk808"
+      # Modules for the peripherals on the Hardware Model's main board
+      # (outside of the SoC itself)
+      MOD_HWM=""
+      # Modules for the IP blocks/peripherals embedded within the SoC:
+      MOD_SOC="i2c-rk3x"
+
+      # Define a function to run from the OS InitRD's '/init' immediately prior
+      # to switching into the Slackware OS proper.
+      # This is after any software RAID arrays et al have been initialised.
+      # There's no current use case for this, but it may be useful in the future.
+      #
+      # At this stage, the following paths for Slackware OS are mounted:
+      # /proc, /sys, /run, /dev
+      # The root file system ('/') is mounted under /mnt
+      #
+      #function hwm_hook_pre_switch_root() {
+      #  echo "Just about to switch into the Slackware OS proper, leaving the OS InitRD"
+      #  sleep 4
+      #}
+      ;;
+esac
+
+# Specific Hardware Model settings:
+#
+# Set the short name that is used by /load_kernel_modules to install
+# the appropriate configuration for modprobe for this Hardware Model:
+# These files are stored within the source tree:
+# source/k/SlkOS-initrd-overlay/usr/share/hwm-configure/platform/aarch64/modprobe.d/
+# Within the OS InitRD and Installer, these are located within:
+# /usr/share/hwm-configure/platform/aarch64/modprobe.d/
+#
+# Note: Typically these are only used to blacklist particular modules from loading
+# within the OS InitRD or Installer.  Within the OS the regular location of
+# /lib/modprobe.d/ is used and has no connection to the content of the
+# OS InitRD/Installer.
+case $HWM in
+   "Pine64 Pinebook Pro"*|PLATWALK)
+      # Define a post module load hook:
+      # Try to set the maximum brightness of the Pinebook Pro's LCD panel.
+      # This may fail as the interface may not always be present (although it works here),
+      # but if that's the case it'll be set within the OS proper by /etc/rc.d/rc.platform.d
+      # control scripts, where the brightness level can be user-defined:
+      function hwm_hook_post-modload() {
+          ( echo 4000 > /sys/class/backlight/edp-backlight/brightness ) > /dev/null 2>&1 ;}
+      HWM_SHORTNAME=pine64_pbpro ;;
+esac
+
+case $HWM in
+   "Pine64 RockPro64"*|PLATWALK)
+      HWM_SHORTNAME=pine64_rp64 ;;
+esac
+
+case $HWM in
+   "Pine64 PinePhonePro"*|PLATWALK)
+      HWM_SHORTNAME=pine64_ppp ;;
+esac
+
+case $HWM in
+   "Radxa ROCK Pi 4"*|PLATWALK)
+      HWM_SHORTNAME=radxa_rockpi4 ;;
+esac
+
+# The '/load_kernel_modules' script will load the modules
+# set above.

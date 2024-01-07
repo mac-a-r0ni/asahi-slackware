@@ -1,8 +1,0 @@
-PKG=/tmp/
-pod2man \
-  --section=8  \
-  --release="$( grep -E ' Date.*:' os-initrd-mgr | awk -F: '{ print $2 }' )" \
-  --center=' ' \
-  --date="os-initrd-mgr Version $( grep -E ' Version.*: ' os-initrd-mgr | awk -F: '{ print $2 }' )" \
-  os-initrd-mgr.pod 2>&1 | man /dev/stdin
-#  os-initrd-mgr.pod 2>&1 > /tmp/os-initrd-mgr.8
