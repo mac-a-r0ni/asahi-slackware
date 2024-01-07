@@ -1,0 +1,21 @@
+k-asahi
+-------
+
+This is an edited "k-wip" package script from slackwareaarcch64,
+I've basically just hacked it until it made the packages I was
+after. It is by no means perfect, nor easy to work with.
+
+Eventually, I'd like to replace this with a custom script to 
+build what we need, removing all we don't.
+
+For now this works, to build, get the latest asahi kernel source
+tarball, place it in source/ and run the ARM build script from the 
+root k-asahi dir, like so "./arm/build". This will create
+separate packages for the kernel, modules, headers, and a source
+package.
+
+The default config contained here is from the alpine linux 
+asahi support git server, and in no way resembles a default
+slackware kernel (but we aren't on default hardware, are we?)
+
+Have fun.
