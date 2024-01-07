@@ -491,7 +491,7 @@ mkinitrd \
   -L \
   -u \
   -C luksdummy \
-  -k $VERSION-$SLKKERNELARCH \
+  -k 6.6.0-$SLKKERNELARCH \
   -s $TMPBUILD/initrd-tree \
   -o $TMPBUILD/initrdtmp.gz
 
